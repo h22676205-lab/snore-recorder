@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="夜聲">
+<meta name="theme-color" content="#0f1226">
+<title>夜聲 睡眠錄音</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: single phone column — home (start + history), a dim recording screen, and a night report */
+:root {
+  --bg: #0f1226;
+  --surface: #191d3a;
+  --surface-2: #232850;
+  --ink: #e7e9f4;
+  --muted: #9aa0bf;
+  --line: #2e3460;
+  --accent: #9fb0ff;
+  --snore: #f0a35e;
+  --other: #7fc8d8;
+  --good: #6fcf9a;
+  --bad: #f07a7a;
+  --font-body: "Noto Sans TC", -apple-system, "PingFang TC", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.5;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+main { max-width: 560px; margin: 0 auto; padding-block: 20px 40px; display: grid; gap: 20px; }
+h1 { font-size: 1.5rem; margin: 0; }
+h2 { font-size: .8rem; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; font-weight: 500; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.card { background: var(--surface); border-radius: 16px; padding: 16px; display: grid; gap: 12px; }
+.btn {
+  font: inherit; font-weight: 500; border: 0; border-radius: 12px; padding: 14px 20px; cursor: pointer;
+  background: var(--accent); color: var(--bg); width: 100%;
+}
+.btn.big { font-size: 1.15rem; padding: 18px; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn.danger { background: var(--bad); color: var(--bg); }
+.btn:focus-visible, .link:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.link { font: inherit; font-size: .9rem; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; }
+.link.danger { color: var(--bad); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { flex: 1; font: inherit; font-size: .9rem; border: 0; background: transparent; color: var(--muted); padding: 10px 0; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); }
+.tips { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: .9rem; display: grid; gap: 4px; }
+.err { color: var(--bad); font-size: .9rem; }
+
+.hist { display: grid; gap: 8px; }
+.hist-item { background: var(--surface); border-radius: 12px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; border: 0; color: inherit; font: inherit; text-align: left; width: 100%; }
+.hist-item .when { font-weight: 500; }
+.hist-item .sub { font-size: .85rem; color: var(--muted); }
+.score { font-family: var(--font-num); font-size: 1.3rem; min-width: 3ch; text-align: right; }
+.empty { color: var(--muted); text-align: center; padding: 16px; background: var(--surface); border-radius: 12px; }
+
+/* recording screen: near-black to save OLED battery */
+#rec { position: fixed; inset: 0; background: #000; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px)); }
+#rec .clock { font-family: var(--font-num); font-size: 4rem; color: #5a6088; letter-spacing: .02em; }
+#rec .elapsed { color: #4a5078; font-size: .95rem; }
+#rec .meter { width: min(280px, 80vw); height: 6px; background: #14172c; border-radius: 3px; overflow: hidden; }
+#rec .meter > div { height: 100%; width: 0; background: #3c4680; transition: width .1s linear; }
+#rec .counts { color: #4a5078; font-size: .9rem; display: flex; gap: 16px; }
+#rec .warn { color: #b0784a; font-size: .85rem; text-align: center; max-width: 300px; }
+#rec .stop { width: min(280px, 80vw); background: #14172c; color: #7a80a8; }
+
+/* report */
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.stat { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+.stat .label { font-size: .75rem; color: var(--muted); }
+.stat .value { font-family: var(--font-num); font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.stat .unit { font-size: .75rem; color: var(--muted); margin-left: 3px; }
+.verdict { font-size: .95rem; }
+canvas.timeline { width: 100%; height: 140px; display: block; }
+.legend { display: flex; gap: 14px; font-size: .8rem; color: var(--muted); flex-wrap: wrap; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.clips { display: grid; gap: 8px; }
+.clip { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; }
+.clip-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tag { font-size: .75rem; padding: 1px 8px; border-radius: 999px; background: var(--surface); }
+.tag.snore { color: var(--snore); } .tag.other { color: var(--other); }
+.clip audio { width: 100%; height: 36px; }
+.clip-actions { display: flex; gap: 14px; }
+.filter { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+<main id="home">
+  <header>
+    <h1>夜聲 睡眠錄音</h1>
+    <p class="muted">睡覺時放在床邊，自動偵測鼾聲和夜間聲響，隔天看報告、重聽片段。錄音只存在這支手機。</p>
+  </header>
+
+  <section class="card">
+    <h2>偵測靈敏度</h2>
+    <div class="seg" id="sens" role="group" aria-label="偵測靈敏度">
+      <button type="button" data-s="low" aria-pressed="false">低</button>
+      <button type="button" data-s="mid" aria-pressed="true">中</button>
+      <button type="button" data-s="high" aria-pressed="false">高</button>
+    </div>
+    <p class="muted" style="font-size:.85rem">用呼吸器時背景比較吵，抓不到鼾聲就調高；誤判太多就調低。</p>
+    <button class="btn big" type="button" id="startBtn">開始睡眠錄音</button>
+    <p class="err" id="startErr" role="alert" hidden></p>
+    <ul class="tips">
+      <li>手機接上充電器，放在床頭，麥克風朝向你，距離約 1 公尺內。</li>
+      <li>錄音中不要切到其他 App，也不要按側邊鍵鎖螢幕，否則 iPhone 會停止錄音。畫面會自動變暗、保持不鎖定。</li>
+      <li>建議先開「勿擾模式」，避免通知聲被錄進去。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>過去的夜晚</h2>
+    <div class="hist" id="hist"><div class="empty">還沒有紀錄。今晚按「開始睡眠錄音」試試看。</div></div>
+  </section>
+</main>
+
+<main id="report" hidden>
+  <div><button class="link" type="button" id="backBtn">‹ 回首頁</button></div>
+  <header>
+    <h1 id="rTitle">報告</h1>
+    <p class="muted" id="rRange"></p>
+  </header>
+  <section class="card">
+    <p class="verdict" id="rVerdict"></p>
+    <div class="stats">
+      <div class="stat"><div class="label">鼾聲分數</div><div class="value" id="rScore">–</div></div>
+      <div class="stat"><div class="label">打鼾時間</div><div class="value" id="rSnoreMin">–</div></div>
+      <div class="stat"><div class="label">打鼾比例</div><div class="value" id="rSnorePct">–</div></div>
+      <div class="stat"><div class="label">其他聲響</div><div class="value" id="rOther">–</div></div>
+    </div>
+    <p class="muted" style="font-size:.8rem">鼾聲分數 = 打鼾比例 × 平均鼾聲強度的估算值，0–100，只適合跟自己其他晚比較。</p>
+  </section>
+  <section class="card">
+    <h2>整晚音量</h2>
+    <canvas class="timeline" id="rCanvas" role="img" aria-label="整晚每分鐘音量"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--snore)"></span>疑似打鼾</span>
+      <span><span class="dot" style="background:var(--other)"></span>其他聲響</span>
+      <span><span class="dot" style="background:var(--line)"></span>安靜</span>
+      <span><span class="dot" style="background:var(--bad)"></span>錄音中斷</span>
+    </div>
+  </section>
+  <section class="card">
+    <h2>錄到的片段</h2>
+    <div class="filter seg" id="clipFilter" role="group" aria-label="篩選片段">
+      <button type="button" data-f="all" aria-pressed="true">全部</button>
+      <button type="button" data-f="snore" aria-pressed="false">打鼾</button>
+      <button type="button" data-f="other" aria-pressed="false">其他</button>
+    </div>
+    <div class="clips" id="rClips"></div>
+  </section>
+  <section class="card">
+    <button class="btn ghost" type="button" id="delNight">刪除這晚的紀錄</button>
+  </section>
+</main>
+
+<div id="rec" hidden>
+  <div class="clock" id="recClock">--:--</div>
+  <div class="elapsed" id="recElapsed">已錄 0:00</div>
+  <div class="meter" aria-hidden="true"><div id="recMeter"></div></div>
+  <div class="counts"><span>打鼾 <b class="num" id="recSnore">0</b></span><span>其他 <b class="num" id="recOther">0</b></span></div>
+  <div class="warn" id="recWarn" hidden></div>
+  <button class="btn stop" type="button" id="stopBtn">結束錄音</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const pad = (n) => String(n).padStart(2, "0");
+  const hm = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const dur = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${m} 分`; };
+  const dateLabel = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}（${"日一二三四五六"[d.getDay()]}）`; };
+
+  // ---------------- storage (IndexedDB) ----------------
+  let dbp = null;
+  function idb() {
+    if (dbp) return dbp;
+    dbp = new Promise((res, rej) => {
+      const r = indexedDB.open("yesheng", 1);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        db.createObjectStore("nights", { keyPath: "id" });
+        const c = db.createObjectStore("clips", { keyPath: "id" });
+        c.createIndex("night", "night");
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return dbp;
+  }
+  async function tx(store, mode, fn) {
+    const db = await idb();
+    return new Promise((res, rej) => {
+      const t = db.transaction(store, mode);
+      const s = t.objectStore(store);
+      let out;
+      Promise.resolve(fn(s)).then((v) => (out = v));
+      t.oncomplete = () => res(out);
+      t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error);
+    });
+  }
+  const reqP = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const putNight = (n) => tx("nights", "readwrite", (s) => s.put(n));
+  const allNights = () => tx("nights", "readonly", (s) => reqP(s.getAll()));
+  const putClip = (c) => tx("clips", "readwrite", (s) => s.put(c));
+  const clipsOf = (nightId) => tx("clips", "readonly", (s) => reqP(s.index("night").getAll(nightId)));
+  const delClip = (id) => tx("clips", "readwrite", (s) => s.delete(id));
+  async function delNight(id) {
+    const cs = await clipsOf(id);
+    await tx("clips", "readwrite", (s) => cs.forEach((c) => s.delete(c.id)));
+    await tx("nights", "readwrite", (s) => s.delete(id));
+  }
+
+  // ---------------- WAV encoding ----------------
+  function wavBlob(samples, rate) {
+    const buf = new ArrayBuffer(44 + samples.length * 2);
+    const v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + samples.length * 2, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, "data"); v.setUint32(40, samples.length * 2, true);
+    // normalise quiet clips so they are audible on playback
+    let peak = 0; for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]));
+    const gain = peak > 0 ? Math.min(20, 0.9 / peak) : 1;
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i] * gain));
+      v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+
+  // ---------------- detector ----------------
+  // Pure logic, fed one analysis frame at a time; no Web Audio inside so it can be tested on its own.
+  const SENS = { low: 14, mid: 10, high: 7 };
+  function createDetector(opts) {
+    const threshold = opts.threshold;     // dB above background that counts as a sound
+    const frameMs = opts.frameMs;
+    const hist = [];                      // recent frame levels for the background estimate
+    let background = null;
+    let sinceBg = 0;
+    let ev = null;                        // current loud event
+    let lastCand = null;                  // last snore-like event {end, ref}
+    const events = [];
+
+    function updateBackground(db) {
+      hist.push(db);
+      if (hist.length > Math.round(60000 / frameMs)) hist.shift();
+      if (++sinceBg >= Math.round(1000 / frameMs) || background == null) {
+        sinceBg = 0;
+        const s = hist.slice().sort((a, b) => a - b);
+        background = s[Math.floor(s.length * 0.2)];
+      }
+    }
+
+    // returns a finished event or null
+    function push(t, db, lowRatio) {
+      if (background == null || hist.length < Math.round(5000 / frameMs)) { updateBackground(db); return null; }
+      const loud = db > background + threshold;
+      // only learn the background from quiet frames, so long snoring does not raise it
+      if (!loud) updateBackground(db);
+      if (loud) {
+        if (!ev) ev = { start: t, end: t, peak: db, lowSum: 0, n: 0, quietSince: null, bg: background };
+        ev.end = t; ev.peak = Math.max(ev.peak, db); ev.lowSum += lowRatio; ev.n++; ev.quietSince = null;
+        return null;
+      }
+      if (ev) {
+        if (ev.quietSince == null) ev.quietSince = t;
+        if (t - ev.quietSince >= 300) return finish();
+      }
+      return null;
+    }
+
+    function finish() {
+      const e = ev; ev = null;
+      const d = e.end - e.start + frameMs;
+      if (d < 250) return null; // clicks and taps
+      const low = e.lowSum / e.n;
+      const out = { start: e.start, end: e.end + frameMs, peak: e.peak, over: e.peak - e.bg, low, type: "other" };
+      // snore: 0.3–3.5 s, mostly low-frequency energy, repeating every 1.5–10 s
+      const cand = d >= 300 && d <= 3500 && low >= 0.45;
+      if (cand) {
+        if (lastCand) {
+          const gap = out.start - lastCand.end;
+          if (gap >= 1500 && gap <= 10000) { out.type = "snore"; if (lastCand.ref.type !== "snore") { lastCand.ref.type = "snore"; lastCand.ref.relabelled = true; } }
+        }
+        lastCand = { end: out.end, ref: out };
+      }
+      events.push(out);
+      return out;
+    }
+
+    return { push, get background() { return background; }, events };
+  }
+  window.__createDetector = createDetector; // exposed for testing
+
+  // ---------------- recording session ----------------
+  let S = null; // active session state
+
+  async function start() {
+    $("startErr").hidden = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return showStartErr("這個瀏覽器不能使用麥克風。請用 iPhone 的 Safari 開啟這個網址。");
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (e) {
+      return showStartErr("沒有拿到麥克風權限。請到 iPhone「設定 → Safari → 麥克風」改成「允許」或「詢問」，再重新整理頁面。");
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    await ctx.resume();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.3;
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    const mute = ctx.createGain(); mute.gain.value = 0;
+    src.connect(analyser); src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+
+    const rate = ctx.sampleRate;
+    const factor = Math.max(1, Math.round(rate / 16000));
+    const outRate = Math.round(rate / factor);
+    const frameMs = 4096 / rate * 1000;
+    const freq = new Float32Array(analyser.frequencyBinCount);
+    const binHz = rate / analyser.fftSize;
+    const lowEnd = Math.round(500 / binHz), hiStart = Math.round(80 / binHz), hiEnd = Math.round(4000 / binHz);
+
+    const now = Date.now();
+    const night = { id: "n" + now, start: now, end: now, sens: currentSens, minutes: [], snore: 0, other: 0, gaps: [] };
+    const ringSec = 3;
+    S = {
+      stream, ctx, proc, night, outRate,
+      det: createDetector({ threshold: SENS[currentSens], frameMs }),
+      ring: new Float32Array(outRate * ringSec), ringPos: 0, ringFull: false,
+      clip: null, clipCount: 0, wake: null, lastFrameAt: performance.now(),
+      minute: null, timer: null,
+    };
+    await putNight(night);
+
+    proc.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const t = Date.now();
+      S.lastFrameAt = performance.now();
+      // level
+      let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+      const db = 10 * Math.log10(sum / input.length + 1e-12);
+      // share of 80–4000 Hz energy that sits below 500 Hz
+      analyser.getFloatFrequencyData(freq);
+      let lo = 0, all = 0;
+      for (let i = hiStart; i < hiEnd; i++) { const p = Math.pow(10, freq[i] / 10); all += p; if (i < lowEnd) lo += p; }
+      const lowRatio = all > 0 ? lo / all : 0;
+      // downsample into ring + open clip
+      const ds = new Float32Array(Math.floor(input.length / factor));
+      for (let i = 0; i < ds.length; i++) { let a = 0; for (let k = 0; k < factor; k++) a += input[i * factor + k]; ds[i] = a / factor; }
+      if (S.clip) S.clip.parts.push(ds);
+      writeRing(ds);
+
+      tickMinute(t, db);
+      const evDone = S.det.push(t, db, lowRatio);
+      const active = db > (S.det.background ?? 0) + SENS[currentSens];
+      if (active && !S.clip) openClip(t);
+      if (S.clip) {
+        if (active) S.clip.lastLoud = t;
+        if (evDone) { S.clip.events.push(evDone); }
+        if (t - S.clip.lastLoud > 2500 || t - S.clip.start > 30000) closeClip();
+      }
+      if (evDone) countEvent(evDone);
+      updateMeter(db);
+    };
+
+    S.timer = setInterval(watchdog, 1000);
+    document.addEventListener("visibilitychange", onVisibility);
+    await requestWake();
+    showRec(true);
+  }
+
+  function showStartErr(msg) { $("startErr").textContent = msg; $("startErr").hidden = false; }
+
+  function writeRing(ds) {
+    for (let i = 0; i < ds.length; i++) {
+      S.ring[S.ringPos++] = ds[i];
+      if (S.ringPos >= S.ring.length) { S.ringPos = 0; S.ringFull = true; }
+    }
+  }
+  function ringSnapshot() {
+    if (!S.ringFull) return S.ring.slice(0, S.ringPos);
+    const out = new Float32Array(S.ring.length);
+    out.set(S.ring.subarray(S.ringPos)); out.set(S.ring.subarray(0, S.ringPos), S.ring.length - S.ringPos);
+    return out;
+  }
+  function openClip(t) {
+    S.clip = { start: t - 3000, lastLoud: t, pre: ringSnapshot(), parts: [], events: [] };
+  }
+  async function closeClip() {
+    const c = S.clip; S.clip = null;
+    if (!c.events.length) return; // only noise blips
+    const len = c.pre.length + c.parts.reduce((a, p) => a + p.length, 0);
+    const all = new Float32Array(len);
+    all.set(c.pre); let o = c.pre.length; for (const p of c.parts) { all.set(p, o); o += p.length; }
+    const type = c.events.some((e) => e.type === "snore") ? "snore" : "other";
+    const peak = Math.max(...c.events.map((e) => e.over));
+    const clip = { id: "c" + c.start + "-" + Math.random().toString(36).slice(2, 6), night: S.night.id, t: c.start, type, peak, n: c.events.length, blob: wavBlob(all, S.outRate) };
+    S.clipCount++;
+    try {
+      await putClip(clip);
+      // keep at most 120 clips a night: drop the quietest
+      if (S.clipCount > 120) {
+        const cs = await clipsOf(S.night.id);
+        cs.sort((a, b) => a.peak - b.peak);
+        await delClip(cs[0].id); S.clipCount--;
+      }
+    } catch (e) { /* storage full: keep analysing without clips */ }
+  }
+
+  function countEvent(e) {
+    if (e.type === "snore") S.night.snore++; else S.night.other++;
+    if (e.relabelled) { S.night.snore++; S.night.other--; }
+    $("recSnore").textContent = S.night.snore; $("recOther").textContent = S.night.other;
+    const m = S.minute; if (m) { if (e.type === "snore") m.snoreMs += e.end - e.start; else m.otherMs += e.end - e.start; m.peak = Math.max(m.peak, e.over); if (e.relabelled) m.snoreMs += 1500; }
+  }
+
+  function tickMinute(t, db) {
+    const key = Math.floor(t / 60000);
+    if (!S.minute || S.minute.key !== key) {
+      if (S.minute) flushMinute();
+      S.minute = { key, sum: 0, n: 0, snoreMs: 0, otherMs: 0, peak: 0 };
+    }
+    S.minute.sum += db; S.minute.n++;
+  }
+  function flushMinute() {
+    const m = S.minute;
+    S.night.minutes.push({ t: m.key * 60000, avg: +(m.sum / m.n).toFixed(1), snore: Math.round(m.snoreMs), other: Math.round(m.otherMs), peak: +m.peak.toFixed(1) });
+    S.night.end = Date.now();
+    putNight(S.night).catch(() => {});
+  }
+
+  function updateMeter(db) {
+    const bg = S.det.background ?? db;
+    const pct = Math.max(0, Math.min(100, (db - bg + 3) * 4));
+    $("recMeter").style.width = pct + "%";
+  }
+
+  function watchdog() {
+    $("recClock").textContent = hm(Date.now());
+    const el = Date.now() - S.night.start;
+    $("recElapsed").textContent = "已錄 " + Math.floor(el / 3600000) + ":" + pad(Math.floor(el / 60000) % 60);
+    // audio stopped arriving (iOS paused us)
+    if (performance.now() - S.lastFrameAt > 4000) {
+      $("recWarn").textContent = "錄音暫停了。請點一下螢幕恢復，並保持 Safari 在前景。";
+      $("recWarn").hidden = false;
+      if (S.ctx.state !== "running") S.ctx.resume().catch(() => {});
+    } else if (!$("recWarn").dataset.sticky) { $("recWarn").hidden = true; }
+  }
+
+  async function onVisibility() {
+    if (!S) return;
+    if (document.visibilityState === "hidden") {
+      S.hiddenAt = Date.now();
+    } else {
+      if (S.hiddenAt && Date.now() - S.hiddenAt > 5000) {
+        S.night.gaps.push([S.hiddenAt, Date.now()]);
+        $("recWarn").textContent = "剛剛離開了畫面，中間這段沒有錄到。";
+        $("recWarn").hidden = false; $("recWarn").dataset.sticky = "1";
+        setTimeout(() => { delete $("recWarn").dataset.sticky; }, 8000);
+      }
+      S.hiddenAt = null;
+      try { await S.ctx.resume(); } catch {}
+      await requestWake();
+    }
+  }
+
+  async function requestWake() {
+    try { if ("wakeLock" in navigator) S.wake = await navigator.wakeLock.request("screen"); } catch { S.wake = null; }
+  }
+
+  async function stop() {
+    if (!S) return;
+    const s = S;
+    s.proc.onaudioprocess = null;
+    clearInterval(s.timer);
+    document.removeEventListener("visibilitychange", onVisibility);
+    if (s.clip) await closeClip();
+    if (s.minute) flushMinute();
+    s.night.end = Date.now();
+    s.night.score = scoreOf(s.night);
+    await putNight(s.night);
+    s.stream.getTracks().forEach((t) => t.stop());
+    try { await s.ctx.close(); } catch {}
+    try { s.wake && (await s.wake.release()); } catch {}
+    S = null;
+    showRec(false);
+    openReport(s.night.id);
+  }
+
+  document.addEventListener("click", () => { if (S && S.ctx.state !== "running") S.ctx.resume().catch(() => {}); });
+
+  // ---------------- scoring ----------------
+  function scoreOf(n) {
+    const mins = n.minutes.length || 1;
+    const snoreMins = n.minutes.filter((m) => m.snore > 3000).length;
+    const pct = snoreMins / mins;
+    const loud = n.minutes.filter((m) => m.snore > 3000).map((m) => m.peak);
+    const intensity = loud.length ? loud.reduce((a, b) => a + b, 0) / loud.length : 0; // dB over background
+    return Math.round(Math.min(100, pct * 100 * Math.min(2, Math.max(0.5, intensity / 15))));
+  }
+  function verdict(score, pct) {
+    if (score < 5) return "幾乎沒有偵測到打鼾。";
+    if (score < 25) return "有輕微打鼾，大部分時間安靜。";
+    if (score < 50) return "打鼾明顯，建議跟其他晚比較，看是否跟睡姿、喝酒或面罩漏氣有關。";
+    return "打鼾很頻繁。有戴呼吸器還這樣的話，可能是面罩漏氣或壓力不足，建議帶報告給醫師或呼吸治療師看。";
+  }
+
+  // ---------------- UI ----------------
+  let currentSens = "mid";
+  try { currentSens = localStorage.getItem("yesheng-sens") || "mid"; } catch {}
+  function paintSens() { document.querySelectorAll("#sens button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === currentSens))); }
+  paintSens();
+  $("sens").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    currentSens = b.dataset.s; paintSens();
+    try { localStorage.setItem("yesheng-sens", currentSens); } catch {}
+  });
+
+  function showRec(on) {
+    $("rec").hidden = !on;
+    if (on) { $("recSnore").textContent = "0"; $("recOther").textContent = "0"; $("recWarn").hidden = true; $("stopBtn").textContent = "結束錄音"; stopArmed = false; }
+  }
+  let stopArmed = false;
+  $("stopBtn").addEventListener("click", () => {
+    if (!stopArmed) { stopArmed = true; $("stopBtn").textContent = "再按一次結束"; setTimeout(() => { stopArmed = false; if (S) $("stopBtn").textContent = "結束錄音"; }, 4000); return; }
+    stop();
+  });
+  $("startBtn").addEventListener("click", start);
+  $("backBtn").addEventListener("click", () => { $("report").hidden = true; $("home").hidden = false; renderHistory(); window.scrollTo(0, 0); });
+
+  async function renderHistory() {
+    const list = $("hist");
+    let ns = [];
+    try { ns = await allNights(); } catch { list.innerHTML = '<div class="empty">無法讀取手機上的紀錄（可能是私密瀏覽模式）。</div>'; return; }
+    ns.sort((a, b) => b.start - a.start);
+    list.textContent = "";
+    if (!ns.length) { list.innerHTML = '<div class="empty">還沒有紀錄。今晚按「開始睡眠錄音」試試看。</div>'; return; }
+    for (const n of ns) {
+      if (n.score == null) n.score = scoreOf(n);
+      const b = document.createElement("button"); b.type = "button"; b.className = "hist-item";
+      const left = document.createElement("div");
+      const w = document.createElement("div"); w.className = "when"; w.textContent = dateLabel(n.start) + " " + hm(n.start) + "–" + hm(n.end);
+      const sub = document.createElement("div"); sub.className = "sub"; sub.textContent = `${dur(n.end - n.start)} · 打鼾 ${n.snore} 次 · 其他 ${n.other} 次`;
+      left.append(w, sub);
+      const sc = document.createElement("div"); sc.className = "score"; sc.textContent = n.score; sc.title = "鼾聲分數";
+      b.append(left, sc);
+      b.addEventListener("click", () => openReport(n.id));
+      list.appendChild(b);
+    }
+  }
+
+  let reportNight = null, clipFilter = "all", urls = [];
+  async function openReport(id) {
+    const ns = await allNights();
+    const n = ns.find((x) => x.id === id); if (!n) return;
+    reportNight = n;
+    if (n.score == null) n.score = scoreOf(n);
+    $("home").hidden = true; $("report").hidden = false; window.scrollTo(0, 0);
+    $("rTitle").textContent = dateLabel(n.start) + " 的夜晚";
+    $("rRange").textContent = `${hm(n.start)} – ${hm(n.end)}，共 ${dur(n.end - n.start)}`;
+    const mins = n.minutes.length;
+    const snoreMins = n.minutes.filter((m) => m.snore > 3000).length;
+    const pct = mins ? snoreMins / mins : 0;
+    $("rScore").textContent = n.score;
+    $("rSnoreMin").innerHTML = `${snoreMins}<span class="unit">分鐘</span>`;
+    $("rSnorePct").innerHTML = `${Math.round(pct * 100)}<span class="unit">%</span>`;
+    $("rOther").innerHTML = `${n.other}<span class="unit">次</span>`;
+    $("rVerdict").textContent = mins < 10 ? "錄音不到 10 分鐘，資料太少，無法判斷。" : verdict(n.score, pct);
+    drawTimeline(n);
+    renderClips();
+    delArmed = false; $("delNight").textContent = "刪除這晚的紀錄"; $("delNight").className = "btn ghost";
+  }
+
+  function drawTimeline(n) {
+    const cv = $("rCanvas");
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth || 340, H = 140;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const g = cv.getContext("2d"); g.scale(dpr, dpr);
+    const css = getComputedStyle(document.documentElement);
+    const col = (v) => css.getPropertyValue(v).trim();
+    g.clearRect(0, 0, W, H);
+    const top = 6, bottom = 20, ph = H - top - bottom;
+    const span = Math.max(60000, n.end - n.start);
+    const x = (t) => ((t - n.start) / span) * W;
+    const avgs = n.minutes.map((m) => m.avg);
+    const lo = avgs.length ? Math.min(...avgs) : -80, hi = avgs.length ? Math.max(...avgs) : -40;
+    const range = Math.max(10, hi - lo);
+    const bw = Math.max(1, W / Math.max(1, span / 60000) - 0.5);
+    for (const m of n.minutes) {
+      const h = Math.max(2, ((m.avg - lo) / range) * ph * 0.8 + ph * 0.1 + (m.peak > 0 ? Math.min(ph * 0.3, m.peak) : 0));
+      g.fillStyle = m.snore > 3000 ? col("--snore") : m.other > 0 ? col("--other") : col("--line");
+      g.fillRect(x(m.t), top + ph - Math.min(ph, h), bw, Math.min(ph, h));
+    }
+    for (const [a, b] of n.gaps || []) { g.fillStyle = col("--bad"); g.fillRect(x(a), top + ph + 2, Math.max(2, x(b) - x(a)), 3); }
+    g.fillStyle = col("--muted"); g.font = '10px "IBM Plex Mono", monospace'; g.textBaseline = "alphabetic";
+    // hour ticks
+    const first = new Date(n.start); first.setMinutes(0, 0, 0);
+    const stepH = span > 6 * 3600000 ? 2 : 1;
+    for (let t = first.getTime() + 3600000; t < n.end; t += 3600000 * stepH) {
+      const px = x(t); if (px < 48 || px > W - 48) continue; // keep clear of the start/end labels
+      g.textAlign = "center"; g.fillText(hm(t), px, H - 4);
+    }
+    g.textAlign = "left"; g.fillText(hm(n.start), 0, H - 4);
+    g.textAlign = "right"; g.fillText(hm(n.end), W, H - 4);
+  }
+
+  async function renderClips() {
+    urls.forEach((u) => URL.revokeObjectURL(u)); urls = [];
+    const box = $("rClips"); box.textContent = "";
+    let cs = await clipsOf(reportNight.id);
+    cs.sort((a, b) => a.t - b.t);
+    if (clipFilter !== "all") cs = cs.filter((c) => c.type === clipFilter);
+    if (!cs.length) { box.innerHTML = '<div class="muted" style="font-size:.9rem">沒有符合的片段。</div>'; return; }
+    for (const c of cs) {
+      const d = document.createElement("div"); d.className = "clip";
+      const top = document.createElement("div"); top.className = "clip-top";
+      const left = document.createElement("span"); left.className = "num"; left.textContent = hm(c.t);
+      const tag = document.createElement("span"); tag.className = "tag " + c.type; tag.textContent = c.type === "snore" ? "疑似打鼾" : "其他聲響";
+      const info = document.createElement("span"); info.className = "muted"; info.style.fontSize = ".8rem"; info.textContent = `比背景大 ${Math.round(c.peak)} dB`;
+      top.append(left, tag, info);
+      const au = document.createElement("audio"); au.controls = true; au.preload = "none";
+      const u = URL.createObjectURL(c.blob); urls.push(u); au.src = u;
+      const act = document.createElement("div"); act.className = "clip-actions";
+      const dl = document.createElement("a"); dl.className = "link"; dl.href = u; dl.download = `夜聲-${hm(c.t).replace(":", "")}.wav`; dl.textContent = "存檔";
+      const del = document.createElement("button"); del.type = "button"; del.className = "link danger"; del.textContent = "刪除";
+      del.addEventListener("click", async () => {
+        if (del.dataset.armed) { await delClip(c.id); renderClips(); return; }
+        del.dataset.armed = "1"; del.textContent = "確定刪除？";
+      });
+      act.append(dl, del);
+      d.append(top, au, act);
+      box.appendChild(d);
+    }
+  }
+  $("clipFilter").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    clipFilter = b.dataset.f;
+    document.querySelectorAll("#clipFilter button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    renderClips();
+  });
+  let delArmed = false;
+  $("delNight").addEventListener("click", async () => {
+    if (!delArmed) { delArmed = true; $("delNight").textContent = "確定刪除整晚和所有片段？再按一次"; $("delNight").className = "btn danger"; return; }
+    await delNight(reportNight.id);
+    $("backBtn").click();
+  });
+
+  window.addEventListener("pagehide", () => { if (S) { if (S.minute) flushMinute(); } });
+  renderHistory();
+})();
+</script>
+</body>
+</html>
