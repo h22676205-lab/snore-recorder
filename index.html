@@ -458,10 +458,17 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     }
     S.minute.sum += db; S.minute.n++;
   }
+  // every sound after calibration as [start ms, length ms, 1 = snore / 0 = other, dB over background];
+  // built from the detector's own list so a later relabel to snore is kept
+  function eventList() {
+    const from = S.night.start + CALIBRATE_MS;
+    return S.det.events.filter((e) => e.start >= from).map((e) => [e.start, Math.round(e.end - e.start), e.type === "snore" ? 1 : 0, Math.round(e.over)]);
+  }
   function flushMinute() {
     const m = S.minute;
     S.night.minutes.push({ t: m.key * 60000, avg: +(m.sum / m.n).toFixed(1), snore: Math.round(m.snoreMs), other: Math.round(m.otherMs), peak: +m.peak.toFixed(1) });
     S.night.end = Date.now();
+    S.night.events = eventList();
     putNight(S.night).catch(() => {});
   }
 
@@ -512,6 +519,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     if (s.clip) await closeClip();
     if (s.minute) flushMinute();
     s.night.end = Date.now();
+    s.night.events = eventList();
     s.night.done = true;
     s.night.score = scoreOf(s.night);
     await putNight(s.night);
@@ -595,7 +603,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       `夜聲報告 ${dateLabel(n.start)} ${hm(n.start)}–${hm(n.end)}（${dur(n.end - n.start)}）`,
       interrupted(n) ? `狀態：錄音在 ${hm(n.end)} 意外停止` : "狀態：正常結束",
       `靈敏度：${{ low: "低", mid: "中", high: "高" }[n.sens] || n.sens}`,
-      `鼾聲分數 ${n.score ?? scoreOf(n)}，打鼾 ${snoreMins} 分鐘（${mins ? Math.round(snoreMins / mins * 100) : 0}%），打鼾 ${n.snore} 次，其他聲響 ${n.other} 次`,
+      `鼾聲分數 ${n.score ?? scoreOf(n)}，明顯打鼾 ${snoreMins} 分鐘（${mins ? Math.round(snoreMins / mins * 100) : 0}%，一分鐘內打鼾累積超過 3 秒才算），鼾聲 ${n.snore} 聲，其他聲響 ${n.other} 次`,
       (n.gaps || []).length ? "中斷：" + n.gaps.map(([a, b]) => `${hm(a)}–${hm(b)}`).join("、") : "中斷：無",
       "",
       "每 15 分鐘（打鼾分鐘數 / 其他聲響分鐘數 / 平均音量 dBFS）：",
@@ -605,9 +613,16 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       const avg = g.reduce((a, m) => a + m.avg, 0) / g.length;
       lines.push(`${hm(g[0].t)}  ${g.filter((m) => m.snore > 3000).length} / ${g.filter((m) => m.other > 0).length} / ${avg.toFixed(1)}`);
     }
-    const cs = (await clipsOf(n.id)).sort((a, b) => a.t - b.t);
-    lines.push("", `片段（${cs.length} 段）：`);
-    for (const c of cs) lines.push(`${hm(c.t)} ${c.type === "snore" ? "疑似打鼾" : "其他聲響"} +${Math.round(c.peak)}dB`);
+    if (n.events) {
+      const hms = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+      lines.push("", `所有聲響（${n.events.length} 次；時間 / 鼾=疑似打鼾 其=其他 / 秒數 / 比背景大 dB）：`);
+      for (const [t, len, snore, over] of n.events) lines.push(`${hms(t)} ${snore ? "鼾" : "其"} ${(len / 1000).toFixed(1)}s +${over}`);
+    } else {
+      // nights recorded before every sound was logged: fall back to the saved clips
+      const cs = (await clipsOf(n.id)).sort((a, b) => a.t - b.t);
+      lines.push("", `片段（${cs.length} 段，這晚只有片段紀錄）：`);
+      for (const c of cs) lines.push(`${hm(c.t)} ${c.type === "snore" ? "疑似打鼾" : "其他聲響"} +${Math.round(c.peak)}dB`);
+    }
     return lines.join("\n");
   }
 
