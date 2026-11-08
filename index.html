@@ -599,7 +599,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     const c = upCfg();
     $("upRepo").value = c.repo || "";
     $("upToken").value = c.token ? "••••••••" : "";
-    $("upMsg").textContent = c.token ? "已設定，每晚結束錄音會自動上傳到 " + c.repo + "。" : "尚未設定。";
+    $("upMsg").textContent = c.token ? "已設定，報告會自動上傳到 " + c.repo + "（沒網路時，下次打開會補傳）。" : "尚未設定。";
   }
   $("upSave").addEventListener("click", async () => {
     const old = upCfg();
@@ -616,10 +616,27 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       if (info.permissions && info.permissions.push === false) throw new Error("權杖沒有寫入權限（Contents 要選 Read and write）");
       try { localStorage.setItem(UP_KEY, JSON.stringify({ repo, token })); } catch { throw new Error("這個瀏覽器不能儲存設定（可能是私密瀏覽）"); }
       paintUpCfg();
-      $("upMsg").textContent = "連線成功，已儲存。每晚結束錄音會自動上傳到 " + repo + "。";
+      $("upMsg").textContent = "連線成功，已儲存。報告會自動上傳到 " + repo + "。";
+      uploadPending();
     } catch (e) { $("upMsg").textContent = "沒有儲存：" + e.message + "。"; }
   });
   $("upClear").addEventListener("click", () => { try { localStorage.removeItem(UP_KEY); } catch {} paintUpCfg(); });
+
+  // send every finished or cut-short night that has not reached GitHub yet
+  let catchingUp = false;
+  async function uploadPending() {
+    if (catchingUp || !upCfg().token || !navigator.onLine) return;
+    catchingUp = true;
+    try {
+      const ns = (await allNights()).filter((n) => !n.uploaded && !(S && S.night.id === n.id) && n.minutes.length > 0);
+      let ok = 0;
+      for (const n of ns.sort((a, b) => a.start - b.start)) if (await uploadNight(n)) ok++;
+      if (ok) { $("upMsg").textContent = `已自動上傳 ${ok} 晚的報告到 ${upCfg().repo}。`; renderHistory(); }
+    } catch { /* retried on the next open or when the network returns */ }
+    finally { catchingUp = false; }
+  }
+  window.addEventListener("online", uploadPending);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !S) uploadPending(); });
   $("uploadBtn").addEventListener("click", () => uploadNight(reportNight));
 
   document.addEventListener("click", () => { if (S && S.ctx.state !== "running") S.ctx.resume().catch(() => {}); });
@@ -838,7 +855,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
 
   window.addEventListener("pagehide", () => { if (S) { if (S.minute) flushMinute(); } });
   paintUpCfg();
-  renderHistory();
+  renderHistory().then(uploadPending);
 })();
 </script>
 </body>
