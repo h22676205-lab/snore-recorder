@@ -127,7 +127,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     <h2>自動上傳</h2>
     <p class="muted" style="font-size:.85rem">每晚結束錄音時，把報告數據（不含錄音檔）上傳到你的 GitHub repo，讓 Claude 可以直接讀取。</p>
     <label class="muted" style="font-size:.8rem;display:grid;gap:4px">Repo（帳號/名稱）
-      <input id="upRepo" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="h22676205-lab/snore-recorder" style="font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">
+      <input id="upRepo" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="h22676205-lab/sleep-data" style="font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">
     </label>
     <label class="muted" style="font-size:.8rem;display:grid;gap:4px">存取權杖（只存在這支手機）
       <input id="upToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="github_pat_…" style="font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">
@@ -604,7 +604,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     const repo = $("upRepo").value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
     const tokIn = $("upToken").value.trim();
     const token = tokIn && !tokIn.startsWith("••") ? tokIn : old.token;
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { $("upMsg").textContent = "請填 Repo（例如 h22676205-lab/snore-recorder）和權杖。"; return; }
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { $("upMsg").textContent = "請填 Repo（例如 h22676205-lab/sleep-data）和權杖。"; return; }
     $("upMsg").textContent = "測試連線中…";
     try {
       const r = await fetch("https://api.github.com/repos/" + repo, { headers: ghHeaders({ token }) });
