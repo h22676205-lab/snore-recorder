@@ -151,6 +151,10 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     <h1 id="rTitle">報告</h1>
     <p class="muted" id="rRange"></p>
   </header>
+  <section class="card" style="gap:6px">
+    <button class="btn" type="button" id="uploadBtn">上傳這晚的報告</button>
+    <p class="muted" id="uploadMsg" role="status" style="font-size:.85rem"></p>
+  </section>
   <section class="card">
     <p class="verdict" id="rVerdict"></p>
     <div class="stats">
@@ -181,8 +185,6 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     <div class="clips" id="rClips"></div>
   </section>
   <section class="card">
-    <button class="btn" type="button" id="uploadBtn">上傳這晚的報告</button>
-    <p class="muted" id="uploadMsg" role="status" style="font-size:.85rem"></p>
     <button class="btn ghost" type="button" id="copyReport">複製報告文字</button>
     <p class="muted" id="copyMsg" role="status" style="font-size:.85rem">複製後可以直接貼給 Claude 分析。</p>
     <textarea id="copyFallback" rows="6" readonly hidden style="width:100%;font:inherit;font-size:.8rem;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px"></textarea>
