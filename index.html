@@ -123,6 +123,22 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     </ul>
   </section>
 
+  <section class="card">
+    <h2>自動上傳</h2>
+    <p class="muted" style="font-size:.85rem">每晚結束錄音時，把報告數據（不含錄音檔）上傳到你的 GitHub repo，讓 Claude 可以直接讀取。</p>
+    <label class="muted" style="font-size:.8rem;display:grid;gap:4px">Repo（帳號/名稱）
+      <input id="upRepo" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="h22676205-lab/snore-recorder" style="font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">
+    </label>
+    <label class="muted" style="font-size:.8rem;display:grid;gap:4px">存取權杖（只存在這支手機）
+      <input id="upToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="github_pat_…" style="font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px">
+    </label>
+    <div style="display:flex;gap:8px">
+      <button class="btn" type="button" id="upSave">儲存並測試</button>
+      <button class="btn ghost" type="button" id="upClear">清除</button>
+    </div>
+    <p class="muted" id="upMsg" role="status" style="font-size:.85rem"></p>
+  </section>
+
   <section>
     <h2>過去的夜晚</h2>
     <div class="hist" id="hist"><div class="empty">還沒有紀錄。今晚按「開始睡眠錄音」試試看。</div></div>
@@ -165,7 +181,9 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     <div class="clips" id="rClips"></div>
   </section>
   <section class="card">
-    <button class="btn" type="button" id="copyReport">複製報告文字</button>
+    <button class="btn" type="button" id="uploadBtn">上傳這晚的報告</button>
+    <p class="muted" id="uploadMsg" role="status" style="font-size:.85rem"></p>
+    <button class="btn ghost" type="button" id="copyReport">複製報告文字</button>
     <p class="muted" id="copyMsg" role="status" style="font-size:.85rem">複製後可以直接貼給 Claude 分析。</p>
     <textarea id="copyFallback" rows="6" readonly hidden style="width:100%;font:inherit;font-size:.8rem;background:var(--surface-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px"></textarea>
     <button class="btn ghost" type="button" id="delNight">刪除這晚的紀錄</button>
@@ -528,8 +546,79 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     try { s.noSleep && s.noSleep.disable(); } catch {}
     S = null;
     showRec(false);
-    openReport(s.night.id);
+    await openReport(s.night.id);
+    if (upCfg().token) uploadNight(s.night);
   }
+
+  // ---------------- upload to GitHub ----------------
+  const UP_KEY = "yesheng-upload";
+  function upCfg() { try { return JSON.parse(localStorage.getItem(UP_KEY)) || {}; } catch { return {}; } }
+  function b64utf8(text) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function ghHeaders(cfg) { return { Authorization: "Bearer " + cfg.token, Accept: "application/vnd.github+json" }; }
+  const nightPath = (n) => { const d = new Date(n.start); return `nights/${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.json`; };
+
+  async function uploadNight(n) {
+    const cfg = upCfg();
+    const msg = (t) => { if (reportNight && reportNight.id === n.id) $("uploadMsg").textContent = t; };
+    if (!cfg.repo || !cfg.token) { msg("還沒設定上傳：回首頁填 Repo 和權杖。"); return false; }
+    msg("上傳中…");
+    try {
+      const url = `https://api.github.com/repos/${cfg.repo}/contents/${nightPath(n)}`;
+      let sha;
+      const head = await fetch(url, { headers: ghHeaders(cfg) });
+      if (head.ok) sha = (await head.json()).sha;
+      const body = {
+        app: "夜聲", format: 1, id: n.id, start: n.start, end: n.end,
+        startLocal: new Date(n.start).toString(), endLocal: new Date(n.end).toString(),
+        done: n.done !== false, sens: n.sens, score: n.score ?? scoreOf(n), snore: n.snore, other: n.other,
+        gaps: n.gaps || [], minutes: n.minutes, events: n.events || null,
+        report: await reportText(n),
+      };
+      const res = await fetch(url, {
+        method: "PUT", headers: { ...ghHeaders(cfg), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "夜聲 " + nightPath(n), content: b64utf8(JSON.stringify(body, null, 1)), ...(sha ? { sha } : {}) }),
+      });
+      if (!res.ok) throw new Error(res.status === 401 ? "權杖無效或過期" : res.status === 404 || res.status === 403 ? "找不到 repo 或權杖沒有寫入權限" : "GitHub 回應 " + res.status);
+      n.uploaded = Date.now(); await putNight(n);
+      msg("已上傳到 " + cfg.repo + "（" + hm(n.uploaded) + "）");
+      return true;
+    } catch (e) {
+      msg("上傳失敗：" + (e.message || "網路錯誤") + "。可以稍後按「上傳這晚的報告」再試。");
+      return false;
+    }
+  }
+
+  function paintUpCfg() {
+    const c = upCfg();
+    $("upRepo").value = c.repo || "";
+    $("upToken").value = c.token ? "••••••••" : "";
+    $("upMsg").textContent = c.token ? "已設定，每晚結束錄音會自動上傳到 " + c.repo + "。" : "尚未設定。";
+  }
+  $("upSave").addEventListener("click", async () => {
+    const old = upCfg();
+    const repo = $("upRepo").value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
+    const tokIn = $("upToken").value.trim();
+    const token = tokIn && !tokIn.startsWith("••") ? tokIn : old.token;
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { $("upMsg").textContent = "請填 Repo（例如 h22676205-lab/snore-recorder）和權杖。"; return; }
+    $("upMsg").textContent = "測試連線中…";
+    try {
+      const r = await fetch("https://api.github.com/repos/" + repo, { headers: ghHeaders({ token }) });
+      if (r.status === 401) throw new Error("權杖無效或過期");
+      if (!r.ok) throw new Error("找不到這個 repo，請確認名稱");
+      const info = await r.json();
+      if (info.permissions && info.permissions.push === false) throw new Error("權杖沒有寫入權限（Contents 要選 Read and write）");
+      try { localStorage.setItem(UP_KEY, JSON.stringify({ repo, token })); } catch { throw new Error("這個瀏覽器不能儲存設定（可能是私密瀏覽）"); }
+      paintUpCfg();
+      $("upMsg").textContent = "連線成功，已儲存。每晚結束錄音會自動上傳到 " + repo + "。";
+    } catch (e) { $("upMsg").textContent = "沒有儲存：" + e.message + "。"; }
+  });
+  $("upClear").addEventListener("click", () => { try { localStorage.removeItem(UP_KEY); } catch {} paintUpCfg(); });
+  $("uploadBtn").addEventListener("click", () => uploadNight(reportNight));
 
   document.addEventListener("click", () => { if (S && S.ctx.state !== "running") S.ctx.resume().catch(() => {}); });
 
@@ -667,6 +756,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     renderClips();
     delArmed = false; $("delNight").textContent = "刪除這晚的紀錄"; $("delNight").className = "btn ghost";
     $("copyFallback").hidden = true; $("copyMsg").textContent = "複製後可以直接貼給 Claude 分析。";
+    $("uploadMsg").textContent = n.uploaded ? "已上傳（" + dateLabel(n.uploaded) + " " + hm(n.uploaded) + "）" : upCfg().token ? "還沒上傳。" : "要自動上傳，回首頁設定 Repo 和權杖。";
   }
 
   function drawTimeline(n) {
@@ -745,6 +835,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
   });
 
   window.addEventListener("pagehide", () => { if (S) { if (S.minute) flushMinute(); } });
+  paintUpCfg();
   renderHistory();
 })();
 </script>
