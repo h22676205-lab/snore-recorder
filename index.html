@@ -198,6 +198,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
   <div class="meter" aria-hidden="true"><div id="recMeter"></div></div>
   <div class="counts"><span>打鼾 <b class="num" id="recSnore">0</b></span><span>其他 <b class="num" id="recOther">0</b></span></div>
   <div class="elapsed" id="recCal">校準中，2 分鐘後開始偵測</div>
+  <div class="warn" id="recKeep">不要鎖螢幕、不要切換 App，放著就好</div>
   <div class="warn" id="recWarn" hidden></div>
   <button class="btn stop" type="button" id="stopBtn">結束錄音</button>
 </div>
@@ -376,7 +377,11 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     const lowEnd = Math.round(500 / binHz), hiStart = Math.round(80 / binHz), hiEnd = Math.round(4000 / binHz);
 
     const now = Date.now();
-    const night = { id: "n" + now, start: now, end: now, sens: currentSens, minutes: [], snore: 0, other: 0, gaps: [], done: false };
+    const night = {
+      id: "n" + now, start: now, end: now, sens: currentSens, minutes: [], snore: 0, other: 0, gaps: [], done: false,
+      // what the phone allowed, so a night that stops early can be explained afterwards
+      diag: { ua: navigator.userAgent, wakeLockApi: "wakeLock" in navigator, homeScreen: navigator.standalone === true, keepAwake: null, log: [] },
+    };
     const ringSec = 3;
     S = {
       stream, ctx, proc, night, outRate,
@@ -423,6 +428,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     S.timer = setInterval(watchdog, 1000);
     document.addEventListener("visibilitychange", onVisibility);
     showRec(true);
+    setTimeout(checkKeepAwake, 2000);
   }
 
   function showStartErr(msg) { $("startErr").textContent = msg; $("startErr").hidden = false; }
@@ -508,16 +514,29 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     if (flowing && ++S.beat % 15 === 0) { S.night.end = Date.now(); putNight(S.night).catch(() => {}); }
     // audio stopped arriving (iOS paused us)
     if (!flowing) {
-      $("recWarn").textContent = "錄音暫停了。請點一下螢幕恢復，並保持 Safari 在前景。";
+      $("recWarn").textContent = "錄音暫停了。請點一下螢幕恢復，並讓這個頁面一直開在前面。";
       $("recWarn").hidden = false;
       if (S.ctx.state !== "running") S.ctx.resume().catch(() => {});
     } else if (!$("recWarn").dataset.sticky) { $("recWarn").hidden = true; }
   }
 
+  function checkKeepAwake() {
+    if (!S) return;
+    const ok = !!(S.noSleep && S.noSleep.isEnabled);
+    S.night.diag.keepAwake = ok;
+    $("recKeep").textContent = ok
+      ? "螢幕會保持亮著。不要鎖螢幕、不要切換 App，放著就好。"
+      : "⚠ 這個瀏覽器無法讓螢幕保持亮著。請先到 iPhone「設定 → 螢幕顯示與亮度 → 自動鎖定」選「永不」，而且不要鎖螢幕。";
+    putNight(S.night).catch(() => {});
+  }
+
   async function onVisibility() {
     if (!S) return;
+    S.night.diag.log.push([document.visibilityState === "hidden" ? "離開畫面" : "回到畫面", Date.now()]);
     if (document.visibilityState === "hidden") {
       S.hiddenAt = Date.now();
+      S.night.end = Date.now();
+      putNight(S.night).catch(() => {});
     } else {
       if (S.hiddenAt && Date.now() - S.hiddenAt > 5000) {
         S.night.gaps.push([S.hiddenAt, Date.now()]);
@@ -578,7 +597,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
         app: "夜聲", format: 1, id: n.id, start: n.start, end: n.end,
         startLocal: new Date(n.start).toString(), endLocal: new Date(n.end).toString(),
         done: n.done !== false, sens: n.sens, score: n.score ?? scoreOf(n), snore: n.snore, other: n.other,
-        gaps: n.gaps || [], minutes: n.minutes, events: n.events || null,
+        gaps: n.gaps || [], minutes: n.minutes, events: n.events || null, diag: n.diag || null,
         report: await reportText(n),
       };
       const res = await fetch(url, {
@@ -670,7 +689,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
 
   function showRec(on) {
     $("rec").hidden = !on;
-    if (on) { $("recSnore").textContent = "0"; $("recOther").textContent = "0"; $("recWarn").hidden = true; $("recCal").hidden = false; $("stopBtn").textContent = "結束錄音"; stopArmed = false; }
+    if (on) { $("recSnore").textContent = "0"; $("recOther").textContent = "0"; $("recWarn").hidden = true; $("recCal").hidden = false; $("recKeep").textContent = "不要鎖螢幕、不要切換 App，放著就好"; $("stopBtn").textContent = "結束錄音"; stopArmed = false; }
   }
   let stopArmed = false;
   $("stopBtn").addEventListener("click", () => {
