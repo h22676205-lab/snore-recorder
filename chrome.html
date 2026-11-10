@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>QQ網頁瀏覽時間</title>
+<style>
+:root {
+  --bg: #f6f7fb; --surface: #ffffff; --ink: #1d2033; --muted: #6b7090; --line: #e3e5ef;
+  --accent: #3b5bdb; --yt: #e03131; --bar: #dfe4fb; --good: #2f9e44; --bad: #e03131;
+  --font: "Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --num: ui-monospace, "SF Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #11131f; --surface: #1b1e2e; --ink: #e8eaf4; --muted: #9a9fbd; --line: #2c3047;
+    --accent: #91a7ff; --yt: #ff6b6b; --bar: #2a3156; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.5; }
+main { max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; }
+h1 { font-size: 20px; margin: 4px 0 12px; }
+h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+.nav { display: flex; gap: 8px; align-items: center; }
+.nav select { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+button { font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.stat b { display: block; font-family: var(--num); font-size: 24px; }
+.stat span { font-size: 13px; color: var(--muted); }
+.stat.yt b { color: var(--yt); }
+.timeline { position: relative; height: 34px; background: var(--bar); border-radius: 8px; overflow: hidden; }
+.timeline i { position: absolute; top: 0; bottom: 0; background: var(--accent); min-width: 2px; }
+.ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-family: var(--num); margin-top: 4px; }
+.sessions { font-size: 13px; color: var(--muted); margin-top: 8px; font-family: var(--num); }
+.site { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 8px; font-size: 14px; }
+.site .b { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--accent); }
+.site .t { font-family: var(--num); color: var(--muted); }
+.vid { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit; }
+.vid:first-child { border-top: 0; }
+.vid img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: var(--bar); }
+.vid .title { font-size: 14px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.vid .meta { font-size: 12px; color: var(--muted); font-family: var(--num); }
+.row { display: grid; grid-template-columns: 70px 1fr 54px; gap: 8px; font-size: 13px; padding: 5px 0; border-top: 1px solid var(--line); }
+.row .u { overflow-wrap: anywhere; }
+.row .n { font-family: var(--num); color: var(--muted); }
+.row .n:last-child { text-align: right; }
+.muted { color: var(--muted); font-size: 13px; }
+.err { color: var(--bad); }
+input[type=password] { width: 100%; font: inherit; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); margin: 8px 0; }
+details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>QQ網頁瀏覽時間</h1>
+
+  <div id="setup" class="card hidden">
+    <h2>第一次使用：貼上 GitHub 權杖</h2>
+    <div class="muted">跟夜聲同一個權杖就可以（要能讀 sleep-data）。只存在這個瀏覽器裡。</div>
+    <input id="tok" type="password" placeholder="github_pat_…" autocomplete="off">
+    <button class="primary" id="saveTok">儲存並讀取</button>
+    <div id="setupMsg" class="muted"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card nav">
+      <button id="prev" aria-label="前一天">‹</button>
+      <select id="day"></select>
+      <button id="next" aria-label="後一天">›</button>
+      <button id="reload" aria-label="重新整理">↻</button>
+    </div>
+    <div id="msg" class="muted" style="margin:-4px 0 10px"></div>
+
+    <div class="stats">
+      <div class="stat"><b id="sMin">–</b><span>Chrome 分鐘</span></div>
+      <div class="stat yt"><b id="sYt">–</b><span>YouTube 分鐘</span></div>
+      <div class="stat yt"><b id="sYtN">–</b><span>YouTube 影片</span></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>使用時段</h2>
+      <div class="timeline" id="tl"></div>
+      <div class="ticks"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+      <div class="sessions" id="sess"></div>
+    </div>
+    <div class="card">
+      <h2>網站停留時間</h2>
+      <div id="sites"></div>
+    </div>
+    <div class="card">
+      <h2>YouTube（新的在上）</h2>
+      <div id="yt"></div>
+    </div>
+    <div class="card">
+      <details>
+        <summary>全部網址（<span id="allN">0</span>）</summary>
+        <div id="all" style="margin-top:8px"></div>
+      </details>
+    </div>
+    <div class="muted" id="foot"></div>
+    <p><button id="logout">清除這個瀏覽器的權杖</button></p>
+  </div>
+</main>
+<script>
+(() => {
+  const REPO = "h22676205-lab/sleep-data", DIR = "chrome", KEY = "chromelog-view", SHARED = "yesheng-upload";
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function token() {
+    try { const t = localStorage.getItem(KEY); if (t) return t; } catch {}
+    try { const c = JSON.parse(localStorage.getItem(SHARED)); if (c && c.token) return c.token; } catch {}
+    return "";
+  }
+  const hdr = (raw) => ({ Authorization: "Bearer " + token(), Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json" });
+
+  async function gh(path, raw) {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}?t=${Date.now()}`, { headers: hdr(raw), cache: "no-store" });
+    if (r.status === 401 || r.status === 403) throw new Error("權杖沒有權限（" + r.status + "）");
+    if (r.status === 404) throw new Error("還沒有資料");
+    if (!r.ok) throw new Error("GitHub 錯誤 " + r.status);
+    return r.json();
+  }
+
+  // ---- YouTube ----
+  function ytId(u) {
+    const m = u.match(/(?:youtube\.com\/(?:shorts\/|watch\?(?:.*&)?v=|live\/)|youtu\.be\/)([\w-]{11})/);
+    return m ? m[1] : null;
+  }
+  let titles = {};
+  try { titles = JSON.parse(localStorage.getItem("chromelog-titles")) || {}; } catch {}
+  async function ytTitle(id) {
+    if (titles[id]) return titles[id];
+    try {
+      const r = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent("https://www.youtube.com/watch?v=" + id)}`);
+      if (!r.ok) return null;
+      const j = await r.json();
+      titles[id] = j.title;
+      try { localStorage.setItem("chromelog-titles", JSON.stringify(titles)); } catch {}
+      return j.title;
+    } catch { return null; }
+  }
+
+  const secs = hms => { const [h, m, s] = hms.split(":").map(Number); return h * 3600 + m * 60 + s; };
+  const fmtDur = s => s >= 3600 ? `${Math.floor(s / 3600)}時${Math.round(s % 3600 / 60)}分` : s >= 60 ? `${Math.floor(s / 60)}分${s % 60}秒` : `${s}秒`;
+  const host = u => u.replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+
+  // 連續同網址合併
+  function merge(visits) {
+    const out = [];
+    for (const v of visits) {
+      const last = out[out.length - 1];
+      if (last && last.url === v.url && secs(v.start) - (secs(last.start) + last.sec) <= 3) last.sec += v.sec;
+      else out.push({ ...v });
+    }
+    return out;
+  }
+
+  let days = [];
+
+  async function loadList() {
+    const list = await gh(DIR);
+    days = list.filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f.name)).map(f => f.name.slice(0, 10)).sort().reverse();
+    const sel = $("day"), keep = sel.value;
+    sel.innerHTML = days.map(d => {
+      const w = "日一二三四五六"[new Date(d + "T00:00").getDay()];
+      return `<option value="${d}">${d.slice(5).replace("-", "/")}（${w}）</option>`;
+    }).join("");
+    if (keep && days.includes(keep)) sel.value = keep;
+  }
+
+  async function show(day) {
+    $("msg").textContent = "讀取中…";
+    let d;
+    try { d = await gh(`${DIR}/${day}.json`, true); }
+    catch (e) { $("msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+    $("msg").textContent = "";
+
+    const visits = merge(d.visits || []);
+    const yt = visits.filter(v => ytId(v.url));
+    const ytSec = yt.reduce((a, v) => a + v.sec, 0);
+    $("sMin").textContent = Math.round(d.chrome_minutes);
+    $("sYt").textContent = Math.round(ytSec / 60);
+    $("sYtN").textContent = new Set(yt.map(v => ytId(v.url))).size;
+
+    // 時段
+    $("tl").innerHTML = (d.foreground || []).map(f => {
+      const a = secs(f.start) / 864, w = Math.max((secs(f.end) - secs(f.start)) / 864, 0.15);
+      return `<i style="left:${a}%;width:${w}%" title="${f.start}–${f.end}"></i>`;
+    }).join("");
+    // 合併相近（5 分鐘內）的時段來列出
+    const blocks = [];
+    for (const f of d.foreground || []) {
+      const b = blocks[blocks.length - 1];
+      if (b && secs(f.start) - secs(b.end) <= 300) { b.end = f.end; b.min += f.min; }
+      else blocks.push({ ...f });
+    }
+    $("sess").innerHTML = blocks.length ? blocks.map(b => `${b.start.slice(0, 5)}–${b.end.slice(0, 5)}　${Math.round(b.min)} 分`).join("<br>") : "這天沒有使用";
+
+    // 網站
+    const site = {};
+    for (const v of visits) site[host(v.url)] = (site[host(v.url)] || 0) + v.sec;
+    const top = Object.entries(site).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const max = top.length ? top[0][1] : 1;
+    $("sites").innerHTML = top.length ? top.map(([h, s]) =>
+      `<div class="site"><span>${esc(h)}</span><span class="t">${fmtDur(s)}</span><div class="b" style="width:${Math.max(s / max * 100, 2)}%"></div></div>`).join("")
+      : `<div class="muted">還沒有網址紀錄</div>`;
+
+    // YouTube 列表
+    const ytRev = [...yt].reverse();
+    $("yt").innerHTML = ytRev.length ? ytRev.map(v => {
+      const id = ytId(v.url);
+      return `<a class="vid" href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener">
+        <img loading="lazy" src="https://i.ytimg.com/vi/${id}/default.jpg" alt="">
+        <div><div class="title" data-id="${id}">${esc(titles[id] || v.url)}</div>
+        <div class="meta">${v.start.slice(0, 5)} · 看了 ${fmtDur(v.sec)}${/shorts/.test(v.url) ? " · Shorts" : ""}</div></div></a>`;
+    }).join("") : `<div class="muted">這天沒有 YouTube 紀錄</div>`;
+    for (const el of $("yt").querySelectorAll(".title")) {
+      if (titles[el.dataset.id]) continue;
+      ytTitle(el.dataset.id).then(t => { if (t) el.textContent = t; });
+    }
+
+    // 全部
+    $("allN").textContent = visits.length;
+    $("all").innerHTML = [...visits].reverse().map(v =>
+      `<div class="row"><span class="n">${v.start}</span><span class="u">${esc(v.url)}</span><span class="n">${fmtDur(v.sec)}</span></div>`).join("");
+
+    $("foot").textContent = `手機上傳時間：${d.generated_at}（每小時整點更新，內容沒變就不傳）`;
+    const i = days.indexOf(day);
+    $("prev").disabled = i >= days.length - 1;
+    $("next").disabled = i <= 0;
+  }
+
+  async function start() {
+    if (!token()) { $("setup").classList.remove("hidden"); $("app").classList.add("hidden"); return; }
+    $("setup").classList.add("hidden"); $("app").classList.remove("hidden");
+    try { await loadList(); }
+    catch (e) {
+      $("msg").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+      if (/權杖/.test(e.message)) { $("setup").classList.remove("hidden"); $("setupMsg").textContent = e.message; }
+      return;
+    }
+    if (days.length) show($("day").value || days[0]);
+  }
+
+  $("saveTok").onclick = () => {
+    const t = $("tok").value.trim();
+    if (!t) return;
+    try { localStorage.setItem(KEY, t); } catch { $("setupMsg").textContent = "這個瀏覽器不能儲存（可能是私密瀏覽）"; return; }
+    $("tok").value = "";
+    start();
+  };
+  $("day").onchange = () => show($("day").value);
+  $("prev").onclick = () => { const i = days.indexOf($("day").value); if (i < days.length - 1) { $("day").value = days[i + 1]; show(days[i + 1]); } };
+  $("next").onclick = () => { const i = days.indexOf($("day").value); if (i > 0) { $("day").value = days[i - 1]; show(days[i - 1]); } };
+  $("reload").onclick = async () => { await loadList().catch(() => {}); show($("day").value); };
+  $("logout").onclick = () => { try { localStorage.removeItem(KEY); } catch {} location.reload(); };
+  // 開著的時候每 10 分鐘自動更新；切回這個分頁時也更新
+  async function autoRefresh() {
+    if (document.hidden || !token() || !days.length) return;
+    const wasLatest = $("day").value === days[0];
+    await loadList().catch(() => {});
+    if (wasLatest && days.length) $("day").value = days[0];
+    show($("day").value);
+  }
+  setInterval(autoRefresh, 10 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) autoRefresh(); });
+  start();
+})();
+</script>
+</body>
+</html>
