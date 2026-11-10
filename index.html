@@ -120,6 +120,8 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       <li>保險起見，睡前到 iPhone「設定 → 螢幕顯示與亮度 → 自動鎖定」選「永不」，起床後再改回來。</li>
       <li>開始後前 2 分鐘是校準時間，不會偵測，讓你放好手機、躺好。</li>
       <li>鬧鐘請在按「開始睡眠錄音」之前設好。錄音中切到時鐘 App 也會讓錄音停止。</li>
+      <li>手機放在床頭桌這類硬的平面，螢幕朝上，底部（麥克風）朝向你，離頭 1 公尺內。不要壓在枕頭或被子上，軟的東西會擋住麥克風。</li>
+      <li>按開始後，前 2 分鐘請拍一下手或咳一聲，畫面出現「✓ 麥克風有聽到聲音」再睡。</li>
       <li>建議先開「勿擾模式」，避免通知聲被錄進去。</li>
     </ul>
   </section>
@@ -381,7 +383,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     const night = {
       id: "n" + now, start: now, end: now, sens: currentSens, minutes: [], snore: 0, other: 0, gaps: [], done: false,
       // what the phone allowed, so a night that stops early can be explained afterwards
-      diag: { ua: navigator.userAgent, wakeLockApi: "wakeLock" in navigator, homeScreen: navigator.standalone === true, keepAwake: null, log: [] },
+      diag: { ua: navigator.userAgent, wakeLockApi: "wakeLock" in navigator, homeScreen: navigator.standalone === true, keepAwake: null, micHeard: false, log: [] },
     };
     const ringSec = 3;
     S = {
@@ -389,7 +391,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       det: createDetector({ threshold: SENS[currentSens], frameMs }),
       ring: new Float32Array(outRate * ringSec), ringPos: 0, ringFull: false,
       clip: null, clipCount: 0, noSleep, lastFrameAt: performance.now(),
-      minute: null, timer: null, beat: 0,
+      minute: null, timer: null, beat: 0, micHeard: false,
     };
     await putNight(night);
 
@@ -414,6 +416,8 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       tickMinute(t, db);
       // the detector still learns the background while calibrating; its events are ignored
       const calibrating = t - S.night.start < CALIBRATE_MS;
+      // microphone check: any sound clearly above the room's background means the mic is hearing
+      if (!S.micHeard && S.det.background != null && t - S.night.start > 6000 && db > S.det.background + SENS[currentSens]) { S.micHeard = true; S.night.diag.micHeard = true; }
       const evDone = calibrating ? (S.det.push(t, db, lowRatio), null) : S.det.push(t, db, lowRatio);
       const active = !calibrating && db > (S.det.background ?? 0) + SENS[currentSens];
       if (active && !S.clip) openClip(t);
@@ -471,6 +475,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
   }
 
   function countEvent(e) {
+    S.micHeard = true; S.night.diag.micHeard = true;
     if (e.type === "snore") S.night.snore++; else S.night.other++;
     if (e.relabelled) { S.night.snore++; S.night.other--; }
     $("recSnore").textContent = S.night.snore; $("recOther").textContent = S.night.other;
@@ -509,7 +514,16 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     $("recClock").textContent = hm(Date.now());
     const el = Date.now() - S.night.start;
     $("recElapsed").textContent = "已錄 " + Math.floor(el / 3600000) + ":" + pad(Math.floor(el / 60000) % 60);
-    $("recCal").hidden = el >= CALIBRATE_MS;
+    if (S.micHeard) {
+      $("recCal").textContent = "✓ 麥克風有聽到聲音";
+      $("recCal").hidden = el >= CALIBRATE_MS + 10000;
+    } else if (el < CALIBRATE_MS) {
+      $("recCal").textContent = `麥克風測試：請拍一下手或咳一聲（校準還有 ${Math.ceil((CALIBRATE_MS - el) / 1000)} 秒）`;
+      $("recCal").hidden = false;
+    } else {
+      $("recCal").textContent = "⚠ 還沒有聽到任何聲音。請拍手測試；沒反應的話，把手機放在硬的平面（不要壓在枕頭上），底部麥克風朝向你。";
+      $("recCal").hidden = false;
+    }
     const flowing = performance.now() - S.lastFrameAt <= 4000;
     // save how far we got, so a night the phone cuts short still shows where it stopped
     if (flowing && ++S.beat % 15 === 0) { S.night.end = Date.now(); putNight(S.night).catch(() => {}); }
