@@ -301,10 +301,15 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
 
     // returns a finished event or null
     function push(t, db, lowRatio) {
-      if (background == null || hist.length < Math.round(5000 / frameMs)) { updateBackground(db); return null; }
-      const loud = db > background + threshold;
+      // digital silence (the mic still warming up, or muted) says nothing about the room:
+      // keep it out of the background estimate, which it would otherwise pin near -120 dB for good
+      const silent = db < -100;
+      if (background == null || hist.length < Math.round(5000 / frameMs)) { if (!silent) updateBackground(db); return null; }
+      const loud = !silent && db > background + threshold;
+      // a "sound" that never ends means the background estimate is wrong: learn it again from scratch
+      if (ev && t - ev.start > 20000) { ev = null; hist.length = 0; background = null; sinceBg = 0; return null; }
       // only learn the background from quiet frames, so long snoring does not raise it
-      if (!loud) updateBackground(db);
+      if (!loud && !silent) updateBackground(db);
       if (loud) {
         if (!ev) ev = { start: t, end: t, peak: db, lowSum: 0, n: 0, quietSince: null, bg: background };
         ev.end = t; ev.peak = Math.max(ev.peak, db); ev.lowSum += lowRatio; ev.n++; ev.quietSince = null;
@@ -391,7 +396,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       det: createDetector({ threshold: SENS[currentSens], frameMs }),
       ring: new Float32Array(outRate * ringSec), ringPos: 0, ringFull: false,
       clip: null, clipCount: 0, noSleep, lastFrameAt: performance.now(),
-      minute: null, timer: null, beat: 0, micHeard: false,
+      minute: null, timer: null, beat: 0, micHeard: false, peakDb: -120,
     };
     await putNight(night);
 
@@ -402,6 +407,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
       // level
       let sum = 0; for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
       const db = 10 * Math.log10(sum / input.length + 1e-12);
+      if (db > S.peakDb) S.peakDb = db;
       // share of 80–4000 Hz energy that sits below 500 Hz
       analyser.getFloatFrequencyData(freq);
       let lo = 0, all = 0;
@@ -520,9 +526,18 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     } else if (el < CALIBRATE_MS) {
       $("recCal").textContent = `麥克風測試：請拍一下手或咳一聲（校準還有 ${Math.ceil((CALIBRATE_MS - el) / 1000)} 秒）`;
       $("recCal").hidden = false;
+    } else if (S.peakDb < -100) {
+      $("recCal").textContent = "⚠ 麥克風完全沒有收到訊號。請結束錄音，確認麥克風權限已開啟、沒有其他 App 在用麥克風，再重新開始。";
+      $("recCal").hidden = false;
     } else {
       $("recCal").textContent = "⚠ 還沒有聽到任何聲音。請拍手測試；沒反應的話，把手機放在硬的平面（不要壓在枕頭上），底部麥克風朝向你。";
       $("recCal").hidden = false;
+    }
+    // one snapshot after calibration, so a night that detects nothing can be explained from the upload
+    if (el >= CALIBRATE_MS && S.night.diag.bgAtCalEnd == null) {
+      S.night.diag.bgAtCalEnd = +(S.det.background ?? -999).toFixed(1);
+      S.night.diag.peakDb = +S.peakDb.toFixed(1);
+      putNight(S.night).catch(() => {});
     }
     const flowing = performance.now() - S.lastFrameAt <= 4000;
     // save how far we got, so a night the phone cuts short still shows where it stopped
