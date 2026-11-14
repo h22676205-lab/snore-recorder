@@ -76,6 +76,7 @@ p { margin: 0; }
 #rec .counts { color: #4a5078; font-size: .9rem; display: flex; gap: 16px; }
 #rec .warn { color: #b0784a; font-size: .85rem; text-align: center; max-width: 300px; }
 #rec .stop { width: min(280px, 80vw); background: #14172c; color: #7a80a8; }
+#rec .fix { width: min(320px, 90vw); padding: 26px 16px; font-size: 1.25rem; line-height: 1.5; background: #6b2323; color: #ffe1e1; }
 
 /* report */
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -203,6 +204,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
   <div class="elapsed" id="recCal">校準中，2 分鐘後開始偵測</div>
   <div class="warn" id="recKeep">不要鎖螢幕、不要切換 App，放著就好</div>
   <div class="warn" id="recWarn" hidden></div>
+  <button class="btn fix" type="button" id="recFix" hidden>⚠ 錄音中斷了<br>點這裡恢復收音</button>
   <button class="btn stop" type="button" id="stopBtn">結束錄音</button>
 </div>
 
@@ -392,13 +394,14 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     };
     const ringSec = 3;
     S = {
-      stream, ctx, proc, night, outRate,
+      stream, ctx, proc, analyser, src, night, outRate,
       det: createDetector({ threshold: SENS[currentSens], frameMs }),
       ring: new Float32Array(outRate * ringSec), ringPos: 0, ringFull: false,
       clip: null, clipCount: 0, noSleep, lastFrameAt: performance.now(),
       minute: null, timer: null, beat: 0, micHeard: false, peakDb: -120,
     };
     await putNight(night);
+    watchTrack(stream);
 
     proc.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
@@ -516,6 +519,37 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     $("recMeter").style.width = pct + "%";
   }
 
+  // iOS can end the mic track while the page is in the background; resuming the AudioContext alone
+  // then brings back no audio (night of 11/14: nothing recorded after 05:09). Ask for a fresh mic instead.
+  function watchTrack(st) {
+    st.getAudioTracks().forEach((t) => {
+      t.onended = () => { if (S) S.night.diag.log.push(["麥克風被系統中止", Date.now()]); };
+    });
+  }
+
+  async function reviveMic() {
+    if (!S || S.reviving) return false;
+    S.reviving = true;
+    S.night.diag.log.push(["嘗試恢復:" + S.ctx.state, Date.now()]);
+    try {
+      try { await S.ctx.resume(); } catch {}
+      await new Promise((r) => setTimeout(r, 1500));
+      if (performance.now() - S.lastFrameAt < 3000) return true;   // audio is flowing again by itself
+      const ns = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      try { S.src.disconnect(); } catch {}
+      try { S.stream.getTracks().forEach((t) => t.stop()); } catch {}
+      S.stream = ns;
+      S.src = S.ctx.createMediaStreamSource(ns);
+      S.src.connect(S.analyser); S.src.connect(S.proc);
+      watchTrack(ns);
+      S.night.diag.log.push(["重新取得麥克風", Date.now()]);
+      return true;
+    } catch (e) {
+      S.night.diag.log.push(["重新取得麥克風失敗:" + ((e && e.name) || "?"), Date.now()]);
+      return false;
+    } finally { if (S) S.reviving = false; }
+  }
+
   function watchdog() {
     $("recClock").textContent = hm(Date.now());
     const el = Date.now() - S.night.start;
@@ -542,11 +576,14 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
     const flowing = performance.now() - S.lastFrameAt <= 4000;
     // save how far we got, so a night the phone cuts short still shows where it stopped
     if (flowing && ++S.beat % 15 === 0) { S.night.end = Date.now(); putNight(S.night).catch(() => {}); }
-    // audio stopped arriving (iOS paused us)
+    // audio stopped arriving (iOS paused us): iOS only lets audio restart after a touch, so show a big button
+    $("recFix").hidden = flowing;
+    if (!flowing && !S.fixShown) { S.fixShown = true; S.night.diag.log.push(["顯示恢復按鈕:" + S.ctx.state, Date.now()]); }
+    if (flowing) S.fixShown = false;
     if (!flowing) {
       $("recWarn").textContent = "錄音暫停了。請點一下螢幕恢復，並讓這個頁面一直開在前面。";
       $("recWarn").hidden = false;
-      if (S.ctx.state !== "running") S.ctx.resume().catch(() => {});
+      if (document.visibilityState === "visible" && performance.now() - (S.lastRevive || 0) > 20000) { S.lastRevive = performance.now(); reviveMic(); }
     } else if (!$("recWarn").dataset.sticky) { $("recWarn").hidden = true; }
   }
 
@@ -575,7 +612,8 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
         setTimeout(() => { delete $("recWarn").dataset.sticky; }, 8000);
       }
       S.hiddenAt = null;
-      try { await S.ctx.resume(); } catch {}
+      S.lastRevive = performance.now();
+      reviveMic();
     }
   }
 
@@ -688,7 +726,10 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !S) uploadPending(); });
   $("uploadBtn").addEventListener("click", () => uploadNight(reportNight));
 
-  document.addEventListener("click", () => { if (S && S.ctx.state !== "running") S.ctx.resume().catch(() => {}); });
+  // a touch is what lets iOS restart a suspended AudioContext, so retry on both click and touchend
+  const onTouch = () => { if (S && performance.now() - S.lastFrameAt > 4000) reviveMic(); };
+  document.addEventListener("click", onTouch);
+  document.addEventListener("touchend", onTouch);
 
   // ---------------- scoring ----------------
   function scoreOf(n) {
@@ -719,6 +760,7 @@ canvas.timeline { width: 100%; height: 140px; display: block; }
 
   function showRec(on) {
     $("rec").hidden = !on;
+    $("recFix").hidden = true;
     if (on) { $("recSnore").textContent = "0"; $("recOther").textContent = "0"; $("recWarn").hidden = true; $("recCal").hidden = false; $("recKeep").textContent = "不要鎖螢幕、不要切換 App，放著就好"; $("stopBtn").textContent = "結束錄音"; stopArmed = false; }
   }
   let stopArmed = false;
